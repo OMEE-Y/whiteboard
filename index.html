@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Simple Whiteboard</title>
+
+<style>
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: #f3f4f6;
+    font-family: Arial, sans-serif;
+  }
+
+  .toolbar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px;
+    background: #fff;
+    border-bottom: 1px solid #ddd;
+  }
+
+  button {
+    padding: 6px 10px;
+    border: 1px solid #ccc;
+    background: #fff;
+    cursor: pointer;
+  }
+
+  button.active {
+    background: #e0e7ff;
+    border-color: #6366f1;
+  }
+
+  input[type="range"] {
+    width: 80px;
+  }
+
+  canvas {
+    display: block;
+    background: white;
+    cursor: crosshair;
+  }
+</style>
+</head>
+
+<body>
+
+
+<div class="toolbar">
+    <h1 style="margin: 0; font-size: 16px;">Excalidraw Clone</h1>
+
+  <button data-tool="pen" class="active">Pen</button>
+  <button data-tool="line">Line</button>
+  <button data-tool="rect">Rect</button>
+  <button data-tool="circle">Circle</button>
+
+  <input type="color" id="color" value="#000000">
+  <input type="range" id="size" min="1" max="10" value="2">
+
+  <button id="clear">Clear</button>
+  <button data-tool="text">Text</button>
+
+</div>
+
+<canvas id="canvas"></canvas>
+
+<script>
+const canvas = document.getElementById("canvas")
+const ctx = canvas.getContext("2d")
+
+function resize() {
+  canvas.width = window.innerWidth
+  canvas.height = window.innerHeight - 42
+}
+resize()
+window.addEventListener("resize", resize)
+
+let tool = "pen"
+let drawing = false
+let startX = 0
+let startY = 0
+let path = []
+let shapes = []
+let preview = null
+
+let color = "#000000"
+let size = 2
+let textInput = null
+
+
+
+document.querySelectorAll("button[data-tool]").forEach(btn => {
+  btn.onclick = () => {
+    tool = btn.dataset.tool
+    document.querySelectorAll("button[data-tool]").forEach(b => b.classList.remove("active"))
+    btn.classList.add("active")
+  }
+})
+
+document.getElementById("color").onchange = e => color = e.target.value
+document.getElementById("size").oninput = e => size = e.target.value
+
+document.getElementById("clear").onclick = () => {
+  shapes = []
+  redraw()
+}
+
+canvas.addEventListener("mousedown", e => {
+  drawing = true
+  startX = e.offsetX
+  startY = e.offsetY
+  path = [{ x: startX, y: startY }]
+})
+canvas.addEventListener("mousedown", e => {
+  if (tool !== "text") return
+
+  const x = e.offsetX
+  const y = e.offsetY
+
+  if (textInput) {
+    commitText()
+  }
+
+  textInput = document.createElement("textarea")
+  textInput.style.position = "absolute"
+  textInput.style.left = canvas.offsetLeft + x + "px"
+  textInput.style.top = canvas.offsetTop + y + "px"
+  textInput.style.font = `${16}px Arial`
+  textInput.style.color = color
+  textInput.style.border = "1px dashed #999"
+  textInput.style.background = "transparent"
+  textInput.style.outline = "none"
+  textInput.style.resize = "none"
+  textInput.style.padding = "2px"
+
+  document.body.appendChild(textInput)
+  textInput.focus()
+
+  textInput.addEventListener("keydown", e => {
+    if (e.key === "Enter") {
+      e.preventDefault()
+      commitText()
+    }
+  })
+})
+function commitText() {
+  if (!textInput) return
+
+  const x = parseInt(textInput.style.left) - canvas.offsetLeft
+  const y = parseInt(textInput.style.top) - canvas.offsetTop + 16
+
+  shapes.push({
+    type: "text",
+    x,
+    y,
+    text: textInput.value,
+    color,
+    size: 16
+  })
+
+  document.body.removeChild(textInput)
+  textInput = null
+  redraw()
+}
+
+
+
+canvas.addEventListener("mousemove", e => {
+  if (!drawing) return
+
+  const x = e.offsetX
+  const y = e.offsetY
+
+  if (tool === "pen") {
+    path.push({ x, y })
+    redraw()
+    drawPath(path, color, size)
+    return
+  }
+
+  preview = makeShape(tool, startX, startY, x, y)
+  redraw()
+  drawShape(preview)
+})
+
+canvas.addEventListener("mouseup", e => {
+  drawing = false
+  const x = e.offsetX
+  const y = e.offsetY
+
+  let shape
+  if (tool === "pen") {
+    shape = { type: "pen", path, color, size }
+  } else {
+    shape = makeShape(tool, startX, startY, x, y)
+    shape.color = color
+    shape.size = size
+  }
+
+  shapes.push(shape)
+  preview = null
+  redraw()
+})
+
+
+function redraw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height)
+  shapes.forEach(drawShape)
+}
+
+function drawShape(s) {
+  ctx.strokeStyle = s.color
+  ctx.lineWidth = s.size
+
+  if (s.type === "pen") drawPath(s.path, s.color, s.size)
+  if (s.type === "line") {
+    ctx.beginPath()
+    ctx.moveTo(s.x1, s.y1)
+    ctx.lineTo(s.x2, s.y2)
+    ctx.stroke()
+  }
+  if (s.type === "rect") {
+    ctx.strokeRect(s.x, s.y, s.w, s.h)
+  }
+  if (s.type === "circle") {
+    ctx.beginPath()
+    ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2)
+    ctx.stroke()
+  }
+  if (s.type === "text") {
+  ctx.fillStyle = s.color
+  ctx.font = `${s.size}px Arial`
+  ctx.textBaseline = "top"
+
+  s.text.split("\n").forEach((line, i) => {
+    ctx.fillText(line, s.x, s.y + i * s.size * 1.2)
+  })
+}
+
+}
+
+function drawPath(path, color, size) {
+  ctx.strokeStyle = color
+  ctx.lineWidth = size
+  ctx.beginPath()
+  path.forEach((p, i) => {
+    if (i === 0) ctx.moveTo(p.x, p.y)
+    else ctx.lineTo(p.x, p.y)
+  })
+  ctx.stroke()
+}
+
+
+function makeShape(type, x1, y1, x2, y2) {
+  if (type === "line") return { type, x1, y1, x2, y2 }
+  if (type === "rect") return { type, x: x1, y: y1, w: x2 - x1, h: y2 - y1 }
+  if (type === "circle") return { type, x: x1, y: y1, r: Math.hypot(x2 - x1, y2 - y1) }
+  if (type === "text") return
+}
+</script>
+
+</body>
+</html>
