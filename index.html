@@ -1,40 +1,308 @@
-<!DOCTYPE html>
-<html lang="en">
+<!DOCTYPE html><html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Simple Whiteboard</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Whiteboard</title><style>
+  * { box-sizing: border-box; }
 
-<style>
-  html, body {
+  body {
     margin: 0;
-    height: 100%;
-    background: #f3f4f6;
     font-family: Arial, sans-serif;
+    background: #f5f5f5;
   }
 
   .toolbar {
     display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 10px;
+    background: #ffffff;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+
+  .toolbar h1 {
+    font-size: 14px;
+    margin: 0 10px 0 0;
+    display: flex;
     align-items: center;
-    gap: 6px;
-    padding: 8px;
-    background: #fff;
-    border-bottom: 1px solid #ddd;
   }
 
   button {
-    padding: 6px 10px;
-    border: 1px solid #ccc;
-    background: #fff;
+    padding: 8px 12px;
+    border-radius: 8px;
+    border: none;
+    background: #e5e7eb;
     cursor: pointer;
+    transition: 0.2s;
   }
 
   button.active {
-    background: #e0e7ff;
-    border-color: #6366f1;
+    background: #6366f1;
+    color: white;
   }
 
-  input[type="range"] {
-    width: 80px;
+  button:hover {
+    background: #d1d5db;
+  }
+
+  input[type="color"], input[type="range"] {
+    height: 36px;
+  }
+
+  canvas {
+    display: block;
+    background: white;
+    touch-action: none;
+  }
+
+  @media (max-width: 600px) {
+    .toolbar {
+      justify-content: center;
+    }
+
+    button {
+      flex: 1 1 auto;
+      font-size: 12px;
+    }
+  }
+</style></head><body><div class="toolbar">
+  <h1>Whiteboard</h1><button data-tool="pen" class="active">Pen</button> <button data-tool="line">Line</button> <button data-tool="rect">Rect</button> <button data-tool="circle">Circle</button> <button data-tool="text">Text</button> <button data-tool="eraser">Eraser</button>
+
+  <input type="color" id="color" value="#000000">
+  <input type="range" id="size" min="1" max="10" value="2"><button id="clear">Clear</button>
+
+</div><canvas id="canvas"></canvas>
+
+<script>
+const canvas = document.getElementById("canvas")
+const ctx = canvas.getContext("2d")
+
+function resize() {
+  canvas.width = window.innerWidth
+  canvas.height = window.innerHeight - document.querySelector(".toolbar").offsetHeight
+}
+resize()
+window.addEventListener("resize", resize)
+
+let tool = "pen"
+let drawing = false
+let startX = 0
+let startY = 0
+let path = []
+let shapes = []
+let preview = null
+
+let color = "#000000"
+let size = 2
+let textInput = null
+
+// TOOL SELECT
+document.querySelectorAll("button[data-tool]").forEach(btn => {
+  btn.onclick = () => {
+    tool = btn.dataset.tool
+    document.querySelectorAll("button[data-tool]").forEach(b => b.classList.remove("active"))
+    btn.classList.add("active")
+  }
+})
+
+// INPUTS
+document.getElementById("color").onchange = e => color = e.target.value
+document.getElementById("size").oninput = e => size = e.target.value
+
+// CLEAR
+document.getElementById("clear").onclick = () => {
+  shapes = []
+  redraw()
+}
+
+// POINTER EVENTS (works for mouse + touch)
+canvas.addEventListener("pointerdown", e => {
+  if (tool === "text") return handleText(e)
+
+  drawing = true
+  startX = e.offsetX
+  startY = e.offsetY
+
+  if (tool === "pen") {
+    path = [{ x: startX, y: startY }]
+  }
+})
+
+canvas.addEventListener("pointermove", e => {
+  if (!drawing) return
+
+  const x = e.offsetX
+  const y = e.offsetY
+
+  if (tool === "eraser") {
+    ctx.clearRect(x - size * 2, y - size * 2, size * 4, size * 4)
+    shapes = shapes.filter(s => !isPointInShape(x, y, s))
+    redraw()
+    return
+  }
+
+  if (tool === "pen") {
+    path.push({ x, y })
+    redraw()
+    drawPath(path, color, size)
+    return
+  }
+
+  preview = makeShape(tool, startX, startY, x, y)
+  redraw()
+  drawShape(preview)
+})
+    redraw()
+    drawPath(path, color, size)
+    return
+  }
+
+  preview = makeShape(tool, startX, startY, x, y)
+  redraw()
+  drawShape(preview)
+})
+
+canvas.addEventListener("pointerup", e => {
+  if (!drawing) return
+  drawing = false
+
+  if (tool === "eraser") return
+
+  const x = e.offsetX
+  const y = e.offsetY
+
+  let shape
+  if (tool === "pen") {
+    shape = { type: "pen", path, color, size }
+  } else {
+    shape = makeShape(tool, startX, startY, x, y)
+    shape.color = color
+    shape.size = size
+  }
+
+  shapes.push(shape)
+  preview = null
+  redraw()
+})
+
+// TEXT TOOL
+function handleText(e) {
+  const x = e.offsetX
+  const y = e.offsetY
+
+  if (textInput) commitText()
+
+  textInput = document.createElement("textarea")
+  textInput.style.position = "absolute"
+  textInput.style.left = canvas.offsetLeft + x + "px"
+  textInput.style.top = canvas.offsetTop + y + "px"
+  textInput.style.font = "16px Arial"
+  textInput.style.color = color
+  textInput.style.border = "1px dashed #999"
+  textInput.style.background = "transparent"
+  textInput.style.outline = "none"
+
+  document.body.appendChild(textInput)
+  textInput.focus()
+
+  textInput.addEventListener("blur", commitText)
+}
+
+function commitText() {
+  if (!textInput) return
+
+  const x = parseInt(textInput.style.left) - canvas.offsetLeft
+  const y = parseInt(textInput.style.top) - canvas.offsetTop
+
+  shapes.push({ type: "text", x, y, text: textInput.value, color, size: 16 })
+
+  document.body.removeChild(textInput)
+  textInput = null
+  redraw()
+}
+
+// DRAWING
+function redraw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height)
+  shapes.forEach(drawShape)
+}
+
+function drawShape(s) {
+  ctx.strokeStyle = s.color
+  ctx.lineWidth = s.size
+
+  if (s.type === "pen") drawPath(s.path, s.color, s.size)
+
+  if (s.type === "line") {
+    ctx.beginPath()
+    ctx.moveTo(s.x1, s.y1)
+    ctx.lineTo(s.x2, s.y2)
+    ctx.stroke()
+  }
+
+  if (s.type === "rect") {
+    ctx.strokeRect(s.x, s.y, s.w, s.h)
+  }
+
+  if (s.type === "circle") {
+    ctx.beginPath()
+    ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2)
+    ctx.stroke()
+  }
+
+  if (s.type === "text") {
+    ctx.fillStyle = s.color
+    ctx.font = `${s.size}px Arial`
+    ctx.fillText(s.text, s.x, s.y)
+  }
+}
+
+function drawPath(path, color, size) {
+  ctx.strokeStyle = color
+  ctx.lineWidth = size
+  ctx.beginPath()
+  path.forEach((p, i) => {
+    if (i === 0) ctx.moveTo(p.x, p.y)
+    else ctx.lineTo(p.x, p.y)
+  })
+  ctx.stroke()
+}
+
+function makeShape(type, x1, y1, x2, y2) {
+  if (type === "line") return { type, x1, y1, x2, y2 }
+  if (type === "rect") return { type, x: x1, y: y1, w: x2 - x1, h: y2 - y1 }
+  if (type === "circle") return { type, x: x1, y: y1, r: Math.hypot(x2 - x1, y2 - y1) }
+}
+
+// BASIC HIT DETECTION FOR ERASER
+function isPointInShape(x, y, s) {
+  if (s.type === "rect") {
+    return x >= s.x && x <= s.x + s.w && y >= s.y && y <= s.y + s.h
+  }
+  if (s.type === "circle") {
+    return Math.hypot(x - s.x, y - s.y) <= s.r
+  }
+  if (s.type === "line") {
+    const dist = Math.abs((s.y2 - s.y1) * x - (s.x2 - s.x1) * y + s.x2 * s.y1 - s.y2 * s.x1) /
+      Math.hypot(s.y2 - s.y1, s.x2 - s.x1)
+    return dist < 5
+  }
+  if (s.type === "pen") {
+    return s.path.some(p => Math.hypot(p.x - x, p.y - y) < 5)
+  }
+  if (s.type === "text") {
+    return x >= s.x && x <= s.x + 50 && y >= s.y && y <= s.y + 20
+  }
+  return false
+}
+  if (type === "rect") return { type, x: x1, y: y1, w: x2 - x1, h: y2 - y1 }
+  if (type === "circle") return { type, x: x1, y: y1, r: Math.hypot(x2 - x1, y2 - y1) }
+}
+</script></body>
+</html>    width: 80px;
   }
 
   canvas {
